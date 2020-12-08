@@ -17,7 +17,8 @@ if !(${CI:-false}); then
 fi
 
 escape() {
-  echo $1 | sed "s#/#%2F#"
+  # /s mess up Athena partitioning
+  echo $1 | sed "s#/#_#"
 }
 
 S3_BUCKET=${S3_BUCKET:-test-artifacts.vector.dev}
