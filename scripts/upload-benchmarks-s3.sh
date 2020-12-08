@@ -43,9 +43,9 @@ for baseline in $(find target/criterion -type d -name new) ; do
   object_name="$(echo "s3://$S3_BUCKET/benches/\
 benches_version=${BENCHES_VERSION}/\
 environment_version=${ENVIRONMENT_VERSION}/\
-group=$(escape "${group_id}")/\
-function=$(escape "${function_id}")/\
-value=$(escape "${value_str}")/\
+group=$(escape "${group_id:-null}")/\
+function=$(escape "${function_id:-null}")/\
+value=$(escape "${value_str:-null}")/\
 branch=${git_branch}/\
 machine=${machine}/\
 operating_system=${operating_system}/\
