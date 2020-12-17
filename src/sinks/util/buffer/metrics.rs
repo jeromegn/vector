@@ -288,18 +288,9 @@ fn compress_distribution(values: Vec<f64>, sample_rates: Vec<u32>) -> (Vec<f64>,
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{
-        buffers::Acker,
-        event::metric::{MetricValue, StatisticKind},
-        sinks::util::BatchSink,
-    };
-    use futures::{future, stream, Sink, SinkExt, StreamExt};
+    use crate::event::metric::{MetricValue, StatisticKind};
     use pretty_assertions::assert_eq;
-    use std::{
-        collections::BTreeMap,
-        sync::{Arc, Mutex},
-    };
-    use tokio::time::Duration;
+    use std::collections::BTreeMap;
 
     fn tag(name: &str) -> BTreeMap<String, String> {
         vec![(name.to_owned(), "true".to_owned())]
@@ -313,53 +304,38 @@ mod test {
         buffer
     }
 
-    fn sink() -> (
-        impl Sink<Event, Error = crate::Error>,
-        Arc<Mutex<Vec<Vec<Metric>>>>,
-    ) {
-        let (acker, _) = Acker::new_for_testing();
-        let sent_requests = Arc::new(Mutex::new(Vec::new()));
-        let sent_requests1 = Arc::clone(&sent_requests);
-
-        let svc = tower::service_fn(move |req| {
-            let sent_requests = Arc::clone(&sent_requests1);
-            sent_requests.lock().unwrap().push(req);
-            future::ok::<_, std::io::Error>(())
-        });
+    fn rebuffer(events: Vec<Event>) -> Vec<Vec<Metric>> {
         let batch_size = BatchSettings::default().bytes(9999).events(6).size;
-        let buffered = BatchSink::new(
-            svc,
-            MetricBuffer::new(batch_size),
-            Duration::from_secs(0),
-            acker,
-        );
+        let mut buffer = MetricBuffer::new(batch_size);
+        let mut result = vec![];
 
-        (buffered, sent_requests)
+        for event in events {
+            match buffer.push(event) {
+                PushResult::Overflow(_) => panic!("overflowed too early"),
+                PushResult::Ok(true) => {
+                    result.push(buffer.fresh_replace().finish());
+                }
+                PushResult::Ok(false) => (),
+            }
+        }
+
+        if !buffer.is_empty() {
+            result.push(buffer.finish())
+        }
+        result
     }
 
-    async fn rebuffer(events: Vec<Event>) -> Vec<Vec<Metric>> {
-        let (sink, sent_batches) = sink();
-
-        let _ = sink
-            .sink_map_err(drop)
-            .send_all(&mut stream::iter(events.into_iter()).map(Ok))
-            .await
-            .unwrap();
-
-        Arc::try_unwrap(sent_batches).unwrap().into_inner().unwrap()
-    }
-
-    async fn metric_buffer_single(metric: Metric) {
+    fn metric_buffer_single(metric: Metric) {
         let events = vec![Event::Metric(metric.clone())];
 
-        let buffer = rebuffer(events).await;
+        let buffer = rebuffer(events);
 
         assert_eq!(buffer.len(), 1);
         assert_eq!(buffer[0], [metric]);
     }
 
-    #[tokio::test]
-    async fn metric_buffer_single_counter() {
+    #[test]
+    fn metric_buffer_single_counter() {
         metric_buffer_single(Metric {
             name: "counter-0".into(),
             namespace: None,
@@ -367,12 +343,11 @@ mod test {
             tags: Some(tag("production")),
             kind: MetricKind::Absolute,
             value: MetricValue::Counter { value: 5.0 },
-        })
-        .await;
+        });
     }
 
-    #[tokio::test]
-    async fn metric_buffer_single_gauge() {
+    #[test]
+    fn metric_buffer_single_gauge() {
         metric_buffer_single(Metric {
             name: "gauge-0".into(),
             namespace: None,
@@ -380,12 +355,11 @@ mod test {
             tags: Some(tag("production")),
             kind: MetricKind::Absolute,
             value: MetricValue::Gauge { value: 6.0 },
-        })
-        .await;
+        });
     }
 
-    #[tokio::test]
-    async fn metric_buffer_counters() {
+    #[test]
+    fn metric_buffer_counters() {
         let mut events = Vec::new();
         for i in 0..4 {
             let event = Event::Metric(Metric {
@@ -423,7 +397,7 @@ mod test {
             events.push(event);
         }
 
-        let buffer = rebuffer(events).await;
+        let buffer = rebuffer(events);
 
         assert_eq!(buffer.len(), 2);
         assert_eq!(buffer[0].len(), 6);
@@ -506,8 +480,8 @@ mod test {
         );
     }
 
-    #[tokio::test]
-    async fn metric_buffer_aggregated_counters() {
+    #[test]
+    fn metric_buffer_aggregated_counters() {
         let mut events = Vec::new();
         for i in 0..4 {
             let event = Event::Metric(Metric {
@@ -535,7 +509,7 @@ mod test {
             events.push(event);
         }
 
-        let buffer = rebuffer(events).await;
+        let buffer = rebuffer(events);
 
         assert_eq!(buffer.len(), 1);
         assert_eq!(buffer[0].len(), 4);
@@ -579,8 +553,8 @@ mod test {
         );
     }
 
-    #[tokio::test]
-    async fn metric_buffer_gauges() {
+    #[test]
+    fn metric_buffer_gauges() {
         let mut events = Vec::new();
         for i in 1..5 {
             let event = Event::Metric(Metric {
@@ -606,7 +580,7 @@ mod test {
             events.push(event);
         }
 
-        let buffer = rebuffer(events).await;
+        let buffer = rebuffer(events);
 
         assert_eq!(buffer.len(), 1);
         assert_eq!(buffer[0].len(), 4);
@@ -650,8 +624,8 @@ mod test {
         );
     }
 
-    #[tokio::test]
-    async fn metric_buffer_aggregated_gauges() {
+    #[test]
+    fn metric_buffer_aggregated_gauges() {
         let mut events = Vec::new();
         for i in 3..6 {
             let event = Event::Metric(Metric {
@@ -693,7 +667,7 @@ mod test {
             events.push(event);
         }
 
-        let buffer = rebuffer(events).await;
+        let buffer = rebuffer(events);
 
         assert_eq!(buffer.len(), 1);
         assert_eq!(buffer[0].len(), 5);
@@ -745,8 +719,8 @@ mod test {
         );
     }
 
-    #[tokio::test]
-    async fn metric_buffer_sets() {
+    #[test]
+    fn metric_buffer_sets() {
         let mut events = Vec::new();
         for i in 0..4 {
             let event = Event::Metric(Metric {
@@ -776,7 +750,7 @@ mod test {
             events.push(event);
         }
 
-        let buffer = rebuffer(events).await;
+        let buffer = rebuffer(events);
 
         assert_eq!(buffer.len(), 1);
 
@@ -797,8 +771,8 @@ mod test {
         );
     }
 
-    #[tokio::test]
-    async fn metric_buffer_distributions() {
+    #[test]
+    fn metric_buffer_distributions() {
         let mut events = Vec::new();
         for _ in 2..6 {
             let event = Event::Metric(Metric {
@@ -832,7 +806,7 @@ mod test {
             events.push(event);
         }
 
-        let buffer = rebuffer(events).await;
+        let buffer = rebuffer(events);
 
         assert_eq!(buffer.len(), 1);
 
@@ -902,8 +876,8 @@ mod test {
         );
     }
 
-    #[tokio::test]
-    async fn metric_buffer_aggregated_histograms_absolute() {
+    #[test]
+    fn metric_buffer_aggregated_histograms_absolute() {
         let mut events = Vec::new();
         for _ in 2..5 {
             let event = Event::Metric(Metric {
@@ -939,7 +913,7 @@ mod test {
             events.push(event);
         }
 
-        let buffer = rebuffer(events).await;
+        let buffer = rebuffer(events);
 
         assert_eq!(buffer.len(), 1);
 
@@ -989,8 +963,8 @@ mod test {
         );
     }
 
-    #[tokio::test]
-    async fn metric_buffer_aggregated_histograms_incremental() {
+    #[test]
+    fn metric_buffer_aggregated_histograms_incremental() {
         let mut events = Vec::new();
         for _ in 0..3 {
             let event = Event::Metric(Metric {
@@ -1026,7 +1000,7 @@ mod test {
             events.push(event);
         }
 
-        let buffer = rebuffer(events).await;
+        let buffer = rebuffer(events);
 
         assert_eq!(buffer.len(), 1);
 
@@ -1063,8 +1037,8 @@ mod test {
         );
     }
 
-    #[tokio::test]
-    async fn metric_buffer_aggregated_summaries() {
+    #[test]
+    fn metric_buffer_aggregated_summaries() {
         let mut events = Vec::new();
         for _ in 0..10 {
             for i in 2..5 {
@@ -1085,7 +1059,7 @@ mod test {
             }
         }
 
-        let buffer = rebuffer(events).await;
+        let buffer = rebuffer(events);
 
         assert_eq!(buffer.len(), 1);
 
