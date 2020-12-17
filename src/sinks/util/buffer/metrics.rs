@@ -349,6 +349,41 @@ mod test {
         Arc::try_unwrap(sent_batches).unwrap().into_inner().unwrap()
     }
 
+    async fn metric_buffer_single(metric: Metric) {
+        let events = vec![Event::Metric(metric.clone())];
+
+        let buffer = rebuffer(events).await;
+
+        assert_eq!(buffer.len(), 1);
+        assert_eq!(buffer[0], [metric]);
+    }
+
+    #[tokio::test]
+    async fn metric_buffer_single_counter() {
+        metric_buffer_single(Metric {
+            name: "counter-0".into(),
+            namespace: None,
+            timestamp: None,
+            tags: Some(tag("production")),
+            kind: MetricKind::Absolute,
+            value: MetricValue::Counter { value: 5.0 },
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn metric_buffer_single_gauge() {
+        metric_buffer_single(Metric {
+            name: "gauge-0".into(),
+            namespace: None,
+            timestamp: None,
+            tags: Some(tag("production")),
+            kind: MetricKind::Absolute,
+            value: MetricValue::Gauge { value: 6.0 },
+        })
+        .await;
+    }
+
     #[tokio::test]
     async fn metric_buffer_counters() {
         let mut events = Vec::new();
