@@ -330,8 +330,7 @@ mod test {
 
         let buffer = rebuffer(events);
 
-        assert_eq!(buffer.len(), 1);
-        assert_eq!(buffer[0], [metric]);
+        assert_eq!(buffer, [[metric]]);
     }
 
     #[test]
