@@ -358,6 +358,36 @@ mod test {
     }
 
     #[test]
+    fn metric_buffer_single_set() {
+        metric_buffer_single(Metric {
+            name: "set".into(),
+            namespace: None,
+            timestamp: None,
+            tags: None,
+            kind: MetricKind::Absolute,
+            value: MetricValue::Set {
+                values: vec!["one".into(), "two".into()].into_iter().collect(),
+            },
+        });
+    }
+
+    #[test]
+    fn metric_buffer_single_distribution_histogram() {
+        metric_buffer_single(Metric {
+            name: "dist".into(),
+            namespace: None,
+            timestamp: None,
+            tags: None,
+            kind: MetricKind::Absolute,
+            value: MetricValue::Distribution {
+                values: vec![2.0],
+                sample_rates: vec![10],
+                statistic: StatisticKind::Histogram,
+            },
+        });
+    }
+
+    #[test]
     fn metric_buffer_counters() {
         let mut events = Vec::new();
         for i in 0..4 {
