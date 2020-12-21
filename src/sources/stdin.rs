@@ -8,7 +8,11 @@ use crate::{
 use bytes::Bytes;
 use futures::{executor, FutureExt, SinkExt, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
-use std::{io, thread};
+use std::{
+    fs,
+    io::{self, BufRead},
+    thread,
+};
 use tokio::sync::mpsc::channel;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -17,6 +21,7 @@ pub struct StdinConfig {
     #[serde(default = "default_max_length")]
     pub max_length: usize,
     pub host_key: Option<String>,
+    pub named_pipe: Option<String>,
 }
 
 impl Default for StdinConfig {
@@ -24,6 +29,7 @@ impl Default for StdinConfig {
         StdinConfig {
             max_length: default_max_length(),
             host_key: None,
+            named_pipe: None,
         }
     }
 }
@@ -48,7 +54,7 @@ impl SourceConfig for StdinConfig {
         shutdown: ShutdownSignal,
         out: Pipeline,
     ) -> crate::Result<super::Source> {
-        stdin_source(io::BufReader::new(io::stdin()), self.clone(), shutdown, out)
+        stdin_source(self.clone(), shutdown, out)
     }
 
     fn output_type(&self) -> DataType {
@@ -60,19 +66,26 @@ impl SourceConfig for StdinConfig {
     }
 
     fn resources(&self) -> Vec<Resource> {
-        vec![Resource::Stdin]
+        if self.named_pipe.is_some() {
+            Vec::new()
+        } else {
+            vec![Resource::Stdin]
+        }
     }
 }
 
-pub fn stdin_source<R>(
-    stdin: R,
+pub fn stdin_source(
     config: StdinConfig,
     shutdown: ShutdownSignal,
     out: Pipeline,
-) -> crate::Result<super::Source>
-where
-    R: Send + io::BufRead + 'static,
-{
+) -> crate::Result<super::Source> {
+    let stdin: Box<dyn Send + BufRead + 'static> = if let Some(ref named_pipe) = config.named_pipe {
+        let file = fs::File::open(named_pipe)?;
+        Box::new(io::BufReader::new(file))
+    } else {
+        Box::new(io::BufReader::new(io::stdin()))
+    };
+
     let host_key = config
         .host_key
         .unwrap_or_else(|| log_schema().host_key().to_string());
